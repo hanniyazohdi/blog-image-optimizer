@@ -8,65 +8,27 @@ import tinify
 import base64
 
 # python3 -m streamlit run image_bot.py
+# CONFIG
 PEXELS_API_KEY = st.secrets["PEXELS_API_KEY"]
 TINYPNG_API_KEY = st.secrets["TINYPNG_API_KEY"]
-
 SHEET_NAME = 'ClientBlogImageSettings'
 TAB_NAME = 'Clients'
 tinify.key = TINYPNG_API_KEY
 
+# Google Sheets Setup
+@st.cache_resource
 def get_sheet_data():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        if "GOOGLE_CREDENTIALS" in st.secrets:
-            creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-            
-            st.write("✅ Credentials created successfully")
-            
-            client = gspread.authorize(creds)
-            st.write("✅ Client authorized")
-            
-            # Debug: Try to open the sheet
-            try:
-                sheet = client.open(SHEET_NAME)
-                st.write(f"✅ Opened sheet: {SHEET_NAME}")
-                
-                # List all worksheets
-                worksheets = [ws.title for ws in sheet.worksheets()]
-                st.write(f"📋 Available worksheets: {worksheets}")
-                
-                # Try to open the specific tab
-                worksheet = sheet.worksheet(TAB_NAME)
-                st.write(f"✅ Opened worksheet: {TAB_NAME}")
-                
-                # Get data
-                data = worksheet.get_all_records()
-                st.write(f"📊 Found {len(data)} records")
-                
-                if data:
-                    st.write("🔍 First record keys:", list(data[0].keys()) if data else "No data")
-                
-                return data
-                
-            except gspread.exceptions.SpreadsheetNotFound:
-                st.error(f"❌ Spreadsheet '{SHEET_NAME}' not found. Check the name and permissions.")
-                return []
-            except gspread.exceptions.WorksheetNotFound:
-                st.error(f"❌ Worksheet '{TAB_NAME}' not found in '{SHEET_NAME}'")
-                return []
-                
-        else:
-            st.write("❌ GOOGLE_CREDENTIALS not found")
-            return []
-            
+        creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        sheet = client.open(SHEET_NAME).worksheet(TAB_NAME)
+        return sheet.get_all_records()
     except Exception as e:
-        st.error(f"❌ Error: {e}")
-        import traceback
-        st.write("Full traceback:", traceback.format_exc())
+        st.error(f"Error accessing Google Sheets: {e}")
         return []
-    
+
 # Helper: Parse aspect ratio
 def parse_aspect_ratio(aspect_ratio_str):
     try:
@@ -76,6 +38,7 @@ def parse_aspect_ratio(aspect_ratio_str):
     except Exception as e:
         st.error(f"Error parsing aspect ratio '{aspect_ratio_str}': {e}")
         return 1.0, 1, 1
+
 # Updated compression function to strictly enforce 250–310 KB and properly convert to JPEG
 def compress_with_tinypng(pil_image, attempt=1, max_attempts=8):
     try:
@@ -152,6 +115,7 @@ def compress_with_tinypng(pil_image, attempt=1, max_attempts=8):
         except Exception as fallback_error:
             st.error(f"Fallback conversion also failed: {fallback_error}")
             return b"", 0
+
 # Main image generation logic
 def generate_images(client_data, prompt, base_filename="image"):
     try:
@@ -173,9 +137,11 @@ def generate_images(client_data, prompt, base_filename="image"):
             response2 = requests.get("https://api.pexels.com/v1/search", headers=headers, params=params_no_orientation)
             if response2.status_code == 200:
                 photos = response2.json().get("photos", [])
+        
         if not photos:
             st.warning("No photos found for your search query. Try different keywords.")
             return []
+        
         output_images = []
         for idx, photo in enumerate(photos[:3], start=1):
             image_url = photo["src"].get("large") or photo["src"]["medium"]
@@ -183,6 +149,7 @@ def generate_images(client_data, prompt, base_filename="image"):
             try:
                 response = requests.get(image_url)
                 original = Image.open(BytesIO(response.content))
+                
                 # Crop to aspect ratio
                 width, height = original.size
                 current_ratio = width / height
@@ -194,6 +161,7 @@ def generate_images(client_data, prompt, base_filename="image"):
                     new_height = int(width / target_ratio)
                     top = (height - new_height) // 2
                     cropped = original.crop((0, top, width, top + new_height))
+                
                 # Resize if needed
                 min_width = 1600
                 min_height = int(min_width * (ar_height / ar_width))
@@ -201,6 +169,7 @@ def generate_images(client_data, prompt, base_filename="image"):
                     resized = cropped.resize((min_width, min_height), Image.LANCZOS)
                 else:
                     resized = cropped
+                
                 compressed_data, size_kb = compress_with_tinypng(resized)
                 filename = f"{base_filename}_{idx}.jpg" if len(photos) > 1 else f"{base_filename}.jpg"
                 output_images.append((compressed_data, size_kb, filename))
@@ -208,24 +177,26 @@ def generate_images(client_data, prompt, base_filename="image"):
             except Exception as e:
                 st.error(f"Error processing image {idx}: {e}")
                 continue
+                
         return output_images
         
     except Exception as e:
         st.error(f"Error in generate_images: {e}")
         return []
+
 # Streamlit UI
 st.title("📸 Blog Image Generator")
-
-st.write("🔍 App-level debug - Secrets available:", list(st.secrets.keys()) if hasattr(st, 'secrets') else "No secrets")
 
 sheet_data = get_sheet_data()
 if not sheet_data:
     st.error("No client data found. Please check your Google Sheets connection.")
     st.stop()
+
 client_names = [row["Client Name"] for row in sheet_data if "Client Name" in row]
 if not client_names:
     st.error("No client names found in the sheet data.")
     st.stop()
+
 selected_client = st.selectbox("Select your client:", client_names)
 upload_option = st.radio("Choose image source:", ["Search with Pexels", "Upload my own image"])
 
@@ -234,21 +205,26 @@ custom_filename = st.text_input("Custom filename (optional):", placeholder="Ente
 
 prompt = ""
 uploaded_file = None
+
 if upload_option == "Search with Pexels":
     prompt = st.text_input("Describe the image you need:")
 else:
     uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
 if st.button("Generate Images") and selected_client:
     client_data = next((row for row in sheet_data if row.get("Client Name") == selected_client), None)
     
     if not client_data:
         st.error(f"Client data not found for: {selected_client}")
         st.stop()
+    
     with st.spinner("Processing image..."):
         if upload_option == "Upload my own image" and uploaded_file:
             try:
                 image = Image.open(uploaded_file)
                 target_ratio, ar_width, ar_height = parse_aspect_ratio(client_data["Aspect Ratio"])
+                
+                # Crop to aspect ratio
                 width, height = image.size
                 current_ratio = width / height
                 if current_ratio > target_ratio:
@@ -259,12 +235,15 @@ if st.button("Generate Images") and selected_client:
                     new_height = int(width / target_ratio)
                     top = (height - new_height) // 2
                     cropped = image.crop((0, top, width, top + new_height))
+                
+                # Resize if needed
                 min_width = 1600
                 min_height = int(min_width * (ar_height / ar_width))
                 if cropped.width >= min_width and cropped.height >= min_height:
                     resized = cropped.resize((min_width, min_height), Image.LANCZOS)
                 else:
                     resized = cropped
+                
                 compressed_data, size_kb = compress_with_tinypng(resized)
                 
                 # Use custom filename if provided, otherwise use default
@@ -280,6 +259,7 @@ if st.button("Generate Images") and selected_client:
                 
             except Exception as e:
                 st.error(f"Error processing uploaded image: {e}")
+                
         elif upload_option == "Search with Pexels" and prompt:
             # Use custom filename if provided, otherwise use default
             base_filename = custom_filename.strip() if custom_filename.strip() else "image"
