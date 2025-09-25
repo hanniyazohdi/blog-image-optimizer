@@ -8,31 +8,34 @@ import tinify
 import base64
 
 # python3 -m streamlit run image_bot.py
-PEXELS_API_KEY = st.secrets.get("PEXELS_API_KEY", "your_fallback_key")
-TINYPNG_API_KEY = st.secrets.get("TINYPNG_API_KEY", "your_fallback_key")
+PEXELS_API_KEY = st.secrets["PEXELS_API_KEY"]
+TINYPNG_API_KEY = st.secrets["TINYPNG_API_KEY"]
 
 SHEET_NAME = 'ClientBlogImageSettings'
 TAB_NAME = 'Clients'
 tinify.key = TINYPNG_API_KEY
 
-@st.cache_resource
+# Remove @st.cache_resource temporarily for debugging
 def get_sheet_data():
+    st.write("🔍 DEBUG: Available secrets:", list(st.secrets.keys()))
+    
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         
-        # Try to get credentials from Streamlit secrets first
         if "GOOGLE_CREDENTIALS" in st.secrets:
+            st.write("✅ Found GOOGLE_CREDENTIALS")
             creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
+            st.write("🔍 Keys in creds:", list(creds_dict.keys()))
             creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         else:
-            # Fallback for local development
-            creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+            st.write("❌ GOOGLE_CREDENTIALS not found")
+            return []
             
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).worksheet(TAB_NAME)
         return sheet.get_all_records()
     except Exception as e:
-        st.error(f"Error accessing Google Sheets: {e}")
+        st.error(f"Error: {e}")
         return []
     
 # Helper: Parse aspect ratio
@@ -183,6 +186,9 @@ def generate_images(client_data, prompt, base_filename="image"):
         return []
 # Streamlit UI
 st.title("📸 Blog Image Generator")
+
+st.write("🔍 App-level debug - Secrets available:", list(st.secrets.keys()) if hasattr(st, 'secrets') else "No secrets")
+
 sheet_data = get_sheet_data()
 if not sheet_data:
     st.error("No client data found. Please check your Google Sheets connection.")
