@@ -1,6 +1,6 @@
 import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import requests
 from PIL import Image
 from io import BytesIO
@@ -8,25 +8,33 @@ import tinify
 import base64
 
 # python3 -m streamlit run image_bot.py
-# CONFIG
-PEXELS_API_KEY = '7KMNL1mUuh4N6d3rwdYX6Mxdu6oNuqw2E8uEyNw7BOAer50f2fUtWTFe'
-TINYPNG_API_KEY = 'XBn78sZWZnLb6kxzCPznkZFgvSzmZK1q'
+PEXELS_API_KEY = st.secrets.get("PEXELS_API_KEY", "your_fallback_key")
+TINYPNG_API_KEY = st.secrets.get("TINYPNG_API_KEY", "your_fallback_key")
+
 SHEET_NAME = 'ClientBlogImageSettings'
 TAB_NAME = 'Clients'
 tinify.key = TINYPNG_API_KEY
 
-# Google Sheets Setup
 @st.cache_resource
 def get_sheet_data():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        
+        # Try to get credentials from Streamlit secrets first
+        if "GOOGLE_CREDENTIALS" in st.secrets:
+            creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        else:
+            # Fallback for local development
+            creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+            
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).worksheet(TAB_NAME)
         return sheet.get_all_records()
     except Exception as e:
         st.error(f"Error accessing Google Sheets: {e}")
         return []
+    
 # Helper: Parse aspect ratio
 def parse_aspect_ratio(aspect_ratio_str):
     try:
