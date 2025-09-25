@@ -15,27 +15,56 @@ SHEET_NAME = 'ClientBlogImageSettings'
 TAB_NAME = 'Clients'
 tinify.key = TINYPNG_API_KEY
 
-# Remove @st.cache_resource temporarily for debugging
 def get_sheet_data():
-    st.write("🔍 DEBUG: Available secrets:", list(st.secrets.keys()))
-    
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         
         if "GOOGLE_CREDENTIALS" in st.secrets:
-            st.write("✅ Found GOOGLE_CREDENTIALS")
             creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
-            st.write("🔍 Keys in creds:", list(creds_dict.keys()))
             creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+            
+            st.write("✅ Credentials created successfully")
+            
+            client = gspread.authorize(creds)
+            st.write("✅ Client authorized")
+            
+            # Debug: Try to open the sheet
+            try:
+                sheet = client.open(SHEET_NAME)
+                st.write(f"✅ Opened sheet: {SHEET_NAME}")
+                
+                # List all worksheets
+                worksheets = [ws.title for ws in sheet.worksheets()]
+                st.write(f"📋 Available worksheets: {worksheets}")
+                
+                # Try to open the specific tab
+                worksheet = sheet.worksheet(TAB_NAME)
+                st.write(f"✅ Opened worksheet: {TAB_NAME}")
+                
+                # Get data
+                data = worksheet.get_all_records()
+                st.write(f"📊 Found {len(data)} records")
+                
+                if data:
+                    st.write("🔍 First record keys:", list(data[0].keys()) if data else "No data")
+                
+                return data
+                
+            except gspread.exceptions.SpreadsheetNotFound:
+                st.error(f"❌ Spreadsheet '{SHEET_NAME}' not found. Check the name and permissions.")
+                return []
+            except gspread.exceptions.WorksheetNotFound:
+                st.error(f"❌ Worksheet '{TAB_NAME}' not found in '{SHEET_NAME}'")
+                return []
+                
         else:
             st.write("❌ GOOGLE_CREDENTIALS not found")
             return []
             
-        client = gspread.authorize(creds)
-        sheet = client.open(SHEET_NAME).worksheet(TAB_NAME)
-        return sheet.get_all_records()
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"❌ Error: {e}")
+        import traceback
+        st.write("Full traceback:", traceback.format_exc())
         return []
     
 # Helper: Parse aspect ratio
